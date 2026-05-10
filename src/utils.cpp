@@ -6,6 +6,7 @@
 #include <QSpinBox>
 #include <QLineEdit>
 #include <QPlainTextEdit>
+#include <optional>
 
 static QString gRclone;
 static QString gRcloneConf;
@@ -60,6 +61,41 @@ QHash<QString, QString> readLocalHosts() {
   return hosts;
 }
 
+struct ProxyTarget {
+  QString host;
+  quint16 port = 0;
+};
+
+std::optional<ProxyTarget> proxyTargetFromUrl(const QString &proxyUrl) {
+  if (proxyUrl.trimmed().isEmpty()) {
+    return std::nullopt;
+  }
+
+  QUrl url = QUrl::fromUserInput(proxyUrl);
+  if (!url.isValid() || url.host().isEmpty() || url.port() <= 0) {
+    return std::nullopt;
+  }
+
+  const QString scheme = url.scheme().toLower();
+  if (!scheme.isEmpty() && scheme != "http") {
+    return std::nullopt;
+  }
+
+  return ProxyTarget{url.host(), static_cast<quint16>(url.port())};
+}
+
+QByteArray proxyConnectRequest(const QString &host, quint16 port) {
+  const QByteArray target =
+      QString("%1:%2").arg(host).arg(port).toUtf8();
+  return "CONNECT " + target +
+         " HTTP/1.1\r\nHost: " + target +
+         "\r\nProxy-Connection: keep-alive\r\n\r\n";
+}
+
+QByteArray proxyFailureResponse() {
+  return "HTTP/1.1 502 Bad Gateway\r\n\r\n";
+}
+
 class LocalHostsNetworkAccessManager : public QNetworkAccessManager {
 public:
   explicit LocalHostsNetworkAccessManager(QObject *parent = nullptr)
@@ -109,6 +145,10 @@ private:
   QTcpSocket *mClient = nullptr;
   QTcpSocket *mUpstream = nullptr;
   QByteArray mRequestBuffer;
+  QByteArray mProxyResponseBuffer;
+  QString mTargetHost;
+  quint16 mTargetPort = 0;
+  bool mWaitingForProxyConnect = false;
 
   void readClient() {
     if (mUpstream) {
@@ -122,7 +162,8 @@ private:
       return;
     }
 
-    const QByteArray firstLine = mRequestBuffer.left(mRequestBuffer.indexOf("\r\n"));
+    const QByteArray firstLine =
+        mRequestBuffer.left(mRequestBuffer.indexOf("\r\n"));
     const QList<QByteArray> parts = firstLine.split(' ');
     if (parts.size() < 3 || parts.at(0).toUpper() != "CONNECT") {
       mClient->write("HTTP/1.1 501 Not Implemented\r\n\r\n");
@@ -138,28 +179,41 @@ private:
       return;
     }
 
-    const QString host = QString::fromUtf8(target.left(portSeparator));
+    mTargetHost = QString::fromUtf8(target.left(portSeparator));
     bool ok = false;
-    const quint16 port = target.mid(portSeparator + 1).toUShort(&ok);
+    mTargetPort = target.mid(portSeparator + 1).toUShort(&ok);
     if (!ok) {
       mClient->write("HTTP/1.1 400 Bad Request\r\n\r\n");
       mClient->disconnectFromHost();
       return;
     }
 
-    const QString mappedHost = readLocalHosts().value(host.toLower(), host);
+    const QString mappedHost =
+        readLocalHosts().value(mTargetHost.toLower(), mTargetHost);
     const QByteArray bodyAfterHeaders = mRequestBuffer.mid(headerEnd + 4);
+    const std::optional<ProxyTarget> upstreamProxy =
+        proxyTargetFromUrl(qgetenv("RCLONE_BROWSER_UPSTREAM_HTTPS_PROXY"));
 
     mUpstream = new QTcpSocket(this);
     QObject::connect(mUpstream, &QTcpSocket::connected, mUpstream,
-                     [this, bodyAfterHeaders]() {
-                       mClient->write("HTTP/1.1 200 Connection Established\r\n\r\n");
-                       if (!bodyAfterHeaders.isEmpty()) {
-                         mUpstream->write(bodyAfterHeaders);
+                     [this, bodyAfterHeaders, upstreamProxy]() {
+                       if (upstreamProxy.has_value()) {
+                         mWaitingForProxyConnect = true;
+                         mUpstream->write(proxyConnectRequest(mTargetHost,
+                                                              mTargetPort));
+                         return;
                        }
+
+                       establishTunnel(bodyAfterHeaders);
                      });
     QObject::connect(mUpstream, &QTcpSocket::readyRead, mUpstream,
-                     [this]() { mClient->write(mUpstream->readAll()); });
+                     [this, bodyAfterHeaders]() {
+                       if (mWaitingForProxyConnect) {
+                         handleProxyConnectResponse(bodyAfterHeaders);
+                         return;
+                       }
+                       mClient->write(mUpstream->readAll());
+                     });
     QObject::connect(mUpstream, &QTcpSocket::disconnected, mClient,
                      &QTcpSocket::disconnectFromHost);
     QObject::connect(mUpstream, &QTcpSocket::errorOccurred, mClient,
@@ -167,7 +221,39 @@ private:
     QObject::connect(mClient, &QTcpSocket::disconnected, mUpstream,
                      &QTcpSocket::disconnectFromHost);
 
-    mUpstream->connectToHost(mappedHost, port);
+    if (upstreamProxy.has_value()) {
+      mUpstream->connectToHost(upstreamProxy->host, upstreamProxy->port);
+    } else {
+      mUpstream->connectToHost(mappedHost, mTargetPort);
+    }
+  }
+
+  void establishTunnel(const QByteArray &bodyAfterHeaders) {
+    mClient->write("HTTP/1.1 200 Connection Established\r\n\r\n");
+    if (!bodyAfterHeaders.isEmpty()) {
+      mUpstream->write(bodyAfterHeaders);
+    }
+  }
+
+  void handleProxyConnectResponse(const QByteArray &bodyAfterHeaders) {
+    mProxyResponseBuffer += mUpstream->readAll();
+    const int headerEnd = mProxyResponseBuffer.indexOf("\r\n\r\n");
+    if (headerEnd < 0) {
+      return;
+    }
+
+    const QByteArray firstLine =
+        mProxyResponseBuffer.left(mProxyResponseBuffer.indexOf("\r\n"));
+    if (!firstLine.contains(" 200 ")) {
+      mClient->write(proxyFailureResponse());
+      mClient->disconnectFromHost();
+      return;
+    }
+
+    mWaitingForProxyConnect = false;
+    mRequestBuffer.clear();
+    mProxyResponseBuffer.clear();
+    establishTunnel(bodyAfterHeaders);
   }
 };
 
@@ -546,6 +632,12 @@ void UseRclonePassword(QProcess *process) {
     }
 
     if (!proxyUrl.isEmpty()) {
+      const QString upstreamProxy = env.value("HTTPS_PROXY").isEmpty()
+                                        ? env.value("https_proxy")
+                                        : env.value("HTTPS_PROXY");
+      if (!upstreamProxy.isEmpty()) {
+        env.insert("RCLONE_BROWSER_UPSTREAM_HTTPS_PROXY", upstreamProxy);
+      }
       env.insert("HTTPS_PROXY", proxyUrl);
       env.insert("https_proxy", proxyUrl);
     }
