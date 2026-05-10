@@ -34,8 +34,7 @@ ExportDialog::ExportDialog(const QString &remote, const QDir &path,
                    &QDialog::reject);
 
   QObject::connect(ui.fileBrowse, &QToolButton::clicked, this, [=]() {
-    QString file =
-        QFileDialog::getSaveFileName(this, "Choose destination file");
+    QString file = GetSaveFileNameNative(this, "Choose destination file");
     if (!file.isEmpty()) {
       ui.textFile->setText(QDir::toNativeSeparators(file));
     }

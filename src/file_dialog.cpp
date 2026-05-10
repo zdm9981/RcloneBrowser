@@ -44,7 +44,12 @@ FileDialog::FileDialog(bool isDownload) : QFileDialog() {
   m_selectedFiles.clear();
 
   this->setFileMode(QFileDialog::Directory);
+#ifdef Q_OS_WIN
+  // Use Windows native file dialog style.
+  this->setOption(QFileDialog::DontUseNativeDialog, false);
+#else
   this->setOption(QFileDialog::DontUseNativeDialog, true);
+#endif
 
   QList<QPushButton *> btns = this->findChildren<QPushButton *>();
   if (!btns.isEmpty()) {

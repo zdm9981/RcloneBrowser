@@ -63,7 +63,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
   ui.rclone->setFocus(Qt::FocusReason::OtherFocusReason);
 
   QObject::connect(ui.rcloneBrowse, &QPushButton::clicked, this, [=]() {
-    QString rclone = QFileDialog::getOpenFileName(
+    QString rclone = GetOpenFileNameNative(
         this, "Select rclone executable", ui.rclone->text());
     if (rclone.isEmpty()) {
       return;
@@ -87,7 +87,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
   });
 
   QObject::connect(ui.rcloneConfBrowse, &QPushButton::clicked, this, [=]() {
-    QString rcloneConf = QFileDialog::getOpenFileName(
+    QString rcloneConf = GetOpenFileNameNative(
         this, "Select .rclone.conf location", ui.rcloneConf->text());
     if (rcloneConf.isEmpty()) {
       return;
@@ -97,7 +97,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
   });
 
   QObject::connect(ui.streamBrowse, &QPushButton::clicked, this, [=]() {
-    QString stream = QFileDialog::getOpenFileName(
+    QString stream = GetOpenFileNameNative(
         this, "Select player for streaming", ui.stream->text());
     if (stream.isEmpty()) {
       return;
@@ -107,7 +107,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
 
   QObject::connect(
       ui.defaultDownloadDirBrowse, &QPushButton::clicked, this, [=]() {
-        QString defaultDownloadDir = QFileDialog::getExistingDirectory(
+        QString defaultDownloadDir = GetExistingDirectoryNative(
             this, "Select default download directory",
             ui.defaultDownloadDir->text());
 
@@ -120,7 +120,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
 
   QObject::connect(
       ui.defaultUploadDirBrowse, &QPushButton::clicked, this, [=]() {
-        QString defaultUploadDir = QFileDialog::getExistingDirectory(
+        QString defaultUploadDir = GetExistingDirectoryNative(
             this, "Select default upload directory",
             ui.defaultUploadDir->text());
 
@@ -132,8 +132,8 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
       });
 
   QObject::connect(ui.queueScriptBrowse, &QPushButton::clicked, this, [=]() {
-    QString queueScript = QFileDialog::getOpenFileName(this, "Select script",
-                                                       ui.queueScript->text());
+    QString queueScript = GetOpenFileNameNative(this, "Select script",
+                                                ui.queueScript->text());
     if (queueScript.isEmpty()) {
       return;
     }
@@ -157,7 +157,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
 
   QObject::connect(
       ui.transferOnScriptBrowse, &QPushButton::clicked, this, [=]() {
-        QString transferOnScript = QFileDialog::getOpenFileName(
+        QString transferOnScript = GetOpenFileNameNative(
             this, "Select script", ui.transferOnScript->text());
         if (transferOnScript.isEmpty()) {
           return;
@@ -183,7 +183,7 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
 
   QObject::connect(
       ui.transferOffScriptBrowse, &QPushButton::clicked, this, [=]() {
-        QString transferOffScript = QFileDialog::getOpenFileName(
+        QString transferOffScript = GetOpenFileNameNative(
             this, "Select script", ui.transferOffScript->text());
         if (transferOffScript.isEmpty()) {
           return;

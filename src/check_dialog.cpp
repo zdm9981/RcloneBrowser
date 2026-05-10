@@ -1,4 +1,5 @@
 #include "check_dialog.h"
+#include "utils.h"
 #include <QFileDialog>
 
 CheckDialog::CheckDialog(const QString &remote, const QDir &path,
@@ -57,7 +58,7 @@ CheckDialog::CheckDialog(const QString &remote, const QDir &path,
 
   QObject::connect(ui.sourceDirBrowse, &QToolButton::clicked, this, [=]() {
     QString sourceDir =
-        QFileDialog::getExistingDirectory(this, "Choose source directory");
+        GetExistingDirectoryNative(this, "Choose source directory");
     if (!sourceDir.isEmpty()) {
       ui.sourceDir->setText(QDir::toNativeSeparators(sourceDir));
       ui.sourceDir->setCursorPosition(0);

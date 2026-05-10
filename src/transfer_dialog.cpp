@@ -302,7 +302,7 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
                    });
 
   QObject::connect(ui.buttonSourceFile, &QToolButton::clicked, this, [=]() {
-    QString file = QFileDialog::getOpenFileName(this, "Choose file to upload");
+    QString file = GetOpenFileNameNative(this, "Choose file to upload");
     if (!file.isEmpty()) {
       if (!mIsEditMode) {
         ui.textSource->setText(QDir::toNativeSeparators(file));
@@ -322,7 +322,35 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
     QString itemToUpload;
     QString folder;
     QString file;
+    QList<QUrl> listSelectedUrls;
 
+#ifdef Q_OS_WIN
+    QMessageBox chooseSourceType(this);
+    chooseSourceType.setIcon(QMessageBox::Question);
+    chooseSourceType.setWindowTitle("Choose source type");
+    chooseSourceType.setText("Choose what to upload:");
+    QPushButton *filesButton = chooseSourceType.addButton(
+        "File(s)", QMessageBox::AcceptRole);
+    QPushButton *folderButton = chooseSourceType.addButton(
+        "Folder", QMessageBox::AcceptRole);
+    chooseSourceType.addButton(QMessageBox::Cancel);
+    chooseSourceType.exec();
+
+    if (chooseSourceType.clickedButton() == filesButton) {
+      QStringList files = GetOpenFileNamesNative(
+          this, "Choose files to upload", last_used_source_folder);
+      for (const QString &selectedFile : files) {
+        listSelectedUrls << QUrl::fromLocalFile(selectedFile);
+      }
+    } else if (chooseSourceType.clickedButton() == folderButton) {
+      QString selectedFolder = GetExistingDirectoryNative(
+          this, "Choose folder to upload", last_used_source_folder);
+      if (!selectedFolder.isEmpty()) {
+        listSelectedUrls << QUrl::fromLocalFile(selectedFolder);
+      }
+    }
+
+#else
     FileDialog fileDialog(false);
     fileDialog.setWindowTitle(
         "Rclone Browser - Upload - choose items (one or many)");
@@ -330,9 +358,15 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
     fileDialog.setMinimumHeight(470);
 
     if (fileDialog.exec()) {
+      listSelectedUrls = fileDialog.selectedUrls();
+#endif
+
+      if (listSelectedUrls.isEmpty()) {
+        return;
+      }
 
       if (!ui.textFilter->toPlainText().isEmpty() &&
-          fileDialog.selectedUrls().count() > 1) {
+          listSelectedUrls.count() > 1) {
 
         int currentTab = ui.tabWidget->currentIndex();
 
@@ -355,7 +389,6 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
         }
       }
 
-      QList<QUrl> listSelectedUrls = fileDialog.selectedUrls();
       itemToUpload = listSelectedUrls.at(0).path();
 
 #ifdef Q_OS_WIN
@@ -462,7 +495,9 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
       }
 
       rcloneCmdUpdate();
+#ifndef Q_OS_WIN
     } // if (fileDialog->exec())
+#endif
   });
 
   QObject::connect(ui.buttonDefaultSource, &QToolButton::clicked, this, [=]() {
@@ -497,14 +532,14 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
         (settings->value("Settings/lastUsedDestFolder").toString());
 
     QString folder;
+    bool hasSelection = false;
 
-    /*
-            FileDialog *fileDialog = new FileDialog(true);
-            fileDialog->setWindowTitle("Choose destination directory for
-       download"); fileDialog->setMinimumWidth(850);
-            fileDialog->setMinimumHeight(525);
-    */
-
+#ifdef Q_OS_WIN
+    folder = GetExistingDirectoryNative(
+        this, "Choose destination directory for download",
+        last_used_dest_folder);
+    hasSelection = !folder.isEmpty();
+#else
     FileDialog fileDialog(true);
     fileDialog.setWindowTitle(
         "Rclone Browser - Download - choose destination directory");
@@ -514,13 +549,15 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
     if (fileDialog.exec()) {
       QList<QUrl> listSelectedUrls = fileDialog.selectedUrls();
       folder = listSelectedUrls.at(0).path();
+      hasSelection = !folder.isEmpty();
+#endif
 
 #ifdef Q_OS_WIN
       // remove leading / e.g. "/C:/"
       folder.remove(0, 1);
 #endif
 
-      if (!folder.isEmpty()) {
+      if (hasSelection) {
         // store new folder in lastUsedDestFolder
         settings->setValue("Settings/lastUsedDestFolder", folder);
         // if one or many
@@ -543,7 +580,9 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
         rcloneCmdUpdate();
       } // if (!folder.isEmpty()
 
+#ifndef Q_OS_WIN
     } // if (fileDialog->exec())
+#endif
   });
 
   QObject::connect(ui.buttonDefaultDest, &QToolButton::clicked, this, [=]() {

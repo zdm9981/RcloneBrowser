@@ -218,7 +218,7 @@ MountDialog::MountDialog(const QString &remote, const QDir &path,
   });
 
   QObject::connect(ui.tb_mountScriptBrowse, &QPushButton::clicked, this, [=]() {
-    QString mountScript = QFileDialog::getOpenFileName(
+    QString mountScript = GetOpenFileNameNative(
         this, "Select script", ui.le_mountScript->text());
 
     if (mountScript.isEmpty()) {
@@ -338,7 +338,7 @@ MountDialog::MountDialog(const QString &remote, const QDir &path,
 
   QObject::connect(ui.le_mountBaseBrowse, &QToolButton::clicked, this, [=]() {
     QString sourceDir =
-        QFileDialog::getExistingDirectory(this, "Choose mounting base folder");
+        GetExistingDirectoryNative(this, "Choose mounting base folder");
     if (!sourceDir.isEmpty()) {
       ui.le_mountBase->setText(QDir::toNativeSeparators(sourceDir));
       ui.le_mountBase->setCursorPosition(0);
@@ -346,8 +346,7 @@ MountDialog::MountDialog(const QString &remote, const QDir &path,
   });
 
   QObject::connect(ui.tb_mountPointNotWin, &QToolButton::clicked, this, [=]() {
-    QString sourceDir =
-        QFileDialog::getExistingDirectory(this, "Choose mounting point");
+    QString sourceDir = GetExistingDirectoryNative(this, "Choose mounting point");
     if (!sourceDir.isEmpty()) {
       ui.le_mountPointNotWin->setText(QDir::toNativeSeparators(sourceDir));
       ui.le_mountPointNotWin->setCursorPosition(0);

@@ -2,6 +2,7 @@
 #include <QRadioButton>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QFileDialog>
 #include <QSpinBox>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -9,6 +10,63 @@
 static QString gRclone;
 static QString gRcloneConf;
 static QString gRclonePassword;
+
+QString GetOpenFileNameNative(QWidget *parent, const QString &caption,
+                              const QString &dir, const QString &filter) {
+  QFileDialog dialog(parent, caption, dir, filter);
+  dialog.setFileMode(QFileDialog::ExistingFile);
+  dialog.setAcceptMode(QFileDialog::AcceptOpen);
+#ifdef Q_OS_WIN
+  dialog.setOption(QFileDialog::DontUseNativeDialog, false);
+#endif
+  if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty()) {
+    return QString();
+  }
+  return dialog.selectedFiles().first();
+}
+
+QStringList GetOpenFileNamesNative(QWidget *parent, const QString &caption,
+                                   const QString &dir, const QString &filter) {
+  QFileDialog dialog(parent, caption, dir, filter);
+  dialog.setFileMode(QFileDialog::ExistingFiles);
+  dialog.setAcceptMode(QFileDialog::AcceptOpen);
+#ifdef Q_OS_WIN
+  dialog.setOption(QFileDialog::DontUseNativeDialog, false);
+#endif
+  if (dialog.exec() != QDialog::Accepted) {
+    return QStringList();
+  }
+  return dialog.selectedFiles();
+}
+
+QString GetSaveFileNameNative(QWidget *parent, const QString &caption,
+                              const QString &dir, const QString &filter) {
+  QFileDialog dialog(parent, caption, dir, filter);
+  dialog.setFileMode(QFileDialog::AnyFile);
+  dialog.setAcceptMode(QFileDialog::AcceptSave);
+#ifdef Q_OS_WIN
+  dialog.setOption(QFileDialog::DontUseNativeDialog, false);
+#endif
+  if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty()) {
+    return QString();
+  }
+  return dialog.selectedFiles().first();
+}
+
+QString GetExistingDirectoryNative(QWidget *parent, const QString &caption,
+                                   const QString &dir) {
+  QFileDialog dialog(parent, caption, dir);
+  dialog.setFileMode(QFileDialog::Directory);
+  dialog.setOption(QFileDialog::ShowDirsOnly, true);
+  dialog.setAcceptMode(QFileDialog::AcceptOpen);
+#ifdef Q_OS_WIN
+  dialog.setOption(QFileDialog::DontUseNativeDialog, false);
+#endif
+  if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty()) {
+    return QString();
+  }
+  return dialog.selectedFiles().first();
+}
 
 // Software versions comparison
 // source: https://helloacm.com/how-to-compare-version-numbers-in-c/
