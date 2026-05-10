@@ -81,9 +81,7 @@ protected:
       mappedRequest.setUrl(url);
 
       if (url.scheme().compare("https", Qt::CaseInsensitive) == 0) {
-        QSslConfiguration ssl = mappedRequest.sslConfiguration();
-        ssl.setPeerVerifyName(originalHost);
-        mappedRequest.setSslConfiguration(ssl);
+        mappedRequest.setPeerVerifyName(originalHost);
       }
     }
 
