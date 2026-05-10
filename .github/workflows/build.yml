@@ -2,9 +2,16 @@ name: Build Rclone Browser
 
 on:
   push:
+    branches:
+      - '**'
     tags:
       - 'v*'
-  
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
 jobs:
   prepare:
     name: Prepare Build Info
@@ -18,26 +25,33 @@ jobs:
       - id: vars
         run: |
           FILE_VERSION=$(cat VERSION)
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
 
-          if [ "$FILE_VERSION" != "$TAG_VERSION" ]; then
-            echo "❌ VERSION file ($FILE_VERSION) does not match tag (${GITHUB_REF_NAME})"
-            exit 1
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+
+            if [[ "$FILE_VERSION" != "$TAG_VERSION" ]]; then
+              echo "ERROR: VERSION file ($FILE_VERSION) does not match tag (${GITHUB_REF_NAME})"
+              exit 1
+            fi
+
+            VERSION="${GITHUB_REF_NAME}"
+            echo "VERSION verified: ${GITHUB_REF_NAME}"
+          else
+            VERSION="v${FILE_VERSION}"
           fi
 
           COMMIT=$(git rev-parse --short HEAD)
-          VERSION_COMMIT="${GITHUB_REF_NAME}-${COMMIT}"
+          VERSION_COMMIT="${VERSION}-${COMMIT}"
 
-          echo "✅ VERSION verified: ${GITHUB_REF_NAME}"
-          echo "version=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
-          echo "commit=${COMMIT}" >> $GITHUB_OUTPUT
-          echo "version_commit=${VERSION_COMMIT}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "commit=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "version_commit=${VERSION_COMMIT}" >> "$GITHUB_OUTPUT"
 
   build_windows:
     name: Windows Build
     runs-on: windows-latest
     needs: prepare
-    
+
     steps:
       - uses: actions/checkout@v4
       - name: Show Build Info
@@ -47,7 +61,7 @@ jobs:
           echo Version Commit: ${{ needs.prepare.outputs.version_commit }}
       - name: Install Development Tools
         run: |
-          choco install visualstudio2022community visualstudio2022-workload-nativedesktop cmake 7zip innosetup -y
+          choco install cmake 7zip innosetup -y
           choco install openssl --version=1.1.1.2100 -y
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
@@ -60,7 +74,7 @@ jobs:
           modules: 'qtmultimedia'
       - name: Build & Package (via CMD script)
         shell: cmd
-        run: scripts\release_windows.cmd ${{ needs.prepare.outputs.version_commit }}
+        run: scripts\release_windows.cmd
       - uses: actions/upload-artifact@v4
         with:
           name: windows-portable
@@ -69,12 +83,12 @@ jobs:
         with:
           name: windows-installer
           path: release/rclone-browser-*-windows-64-bit.exe
-          
+
   build_linux:
     name: Linux Build
     runs-on: ubuntu-latest
     needs: prepare
-    
+
     steps:
       - uses: actions/checkout@v4
       - name: Install Development Tools
@@ -91,17 +105,18 @@ jobs:
           make -j$(nproc)
           cd ..
           mkdir -p release/rclone-browser-${VERSION_COMMIT}-linux
-          cp README.md CHANGELOG.md LICENSE build/build/rclone-browser release/rclone-browser-${VERSION_COMMIT}-linux/          
+          cp README.md CHANGELOG.md LICENSE build/build/rclone-browser release/rclone-browser-${VERSION_COMMIT}-linux/
       - uses: actions/upload-artifact@v4
         with:
-         name: linux
-         path: release/rclone-browser-*-linux/
+          name: linux
+          path: release/rclone-browser-*-linux/
 
   create_release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [prepare, build_windows, build_linux]
-    
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+
     steps:
       - uses: actions/checkout@v4
       - name: Create artifact directory
@@ -112,12 +127,9 @@ jobs:
       - name: Compress artifacts
         run: |
           pushd /tmp/artifacts
-          for i in *;do zip -r -0 $i.zip $i;done
+          for i in *; do zip -r -0 "$i.zip" "$i"; done
           popd
-          
-      - name: Get short commit
-        run: echo "SHORT_SHA=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_ENV
-          
+
       - uses: ncipollo/release-action@v1
         with:
           artifacts: "/tmp/artifacts/*.zip"
@@ -126,7 +138,7 @@ jobs:
           generateReleaseNotes: true
           omitBody: true
           skipIfReleaseExists: true
-          
+
       - name: Trigger rclonebrowser-docker build
         uses: peter-evans/repository-dispatch@v3
         with:
@@ -140,4 +152,3 @@ jobs:
               "commit": "${{ needs.prepare.outputs.commit }}",
               "release_url": "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ needs.prepare.outputs.version }}"
             }
-        

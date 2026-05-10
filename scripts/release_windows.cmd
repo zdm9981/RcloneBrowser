@@ -5,7 +5,17 @@ setlocal enabledelayedexpansion
 set ARCH=x64
 set QT=C:\Qt\6.9.3\msvc2022_64
 
-call "c:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" %ARCH% || ( call :setESC & echo. & echo. & echo %ESC%[91mBuild FAILED.%ESC%[0m  & EXIT /B 1)
+set VSWHERE="%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if exist %VSWHERE% (
+  for /f "usebackq tokens=*" %%i in (`%VSWHERE% -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
+    set VSINSTALL=%%i
+  )
+)
+if "%VSINSTALL%"=="" (
+  set VSINSTALL=c:\Program Files\Microsoft Visual Studio\2022\Community
+)
+
+call "%VSINSTALL%\VC\Auxiliary\Build\vcvarsall.bat" %ARCH% || ( call :setESC & echo. & echo. & echo %ESC%[91mBuild FAILED.%ESC%[0m  & EXIT /B 1)
 
 set PATH=%QT%\bin;%PATH%
 
