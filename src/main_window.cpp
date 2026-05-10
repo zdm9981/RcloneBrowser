@@ -39,6 +39,7 @@ MainWindow::MainWindow() {
   }
 
   auto settings = GetSettings();
+  EnsureLocalHostsFile();
 
 #if !defined(Q_OS_MACOS)
   qApp->setStyle(QStyleFactory::create("Fusion"));
@@ -2710,8 +2711,9 @@ void MainWindow::rcloneGetVersion() {
 
             QString url =
                 QString("https://api.github.com/repos/%1/releases/latest").arg(repo);
-            QNetworkAccessManager manager;
-            QNetworkReply *reply = manager.get(QNetworkRequest(QUrl(url)));
+            auto manager =
+                std::unique_ptr<QNetworkAccessManager>(CreateNetworkAccessManager(this));
+            QNetworkReply *reply = manager->get(QNetworkRequest(QUrl(url)));
 
             QEventLoop event;
             QTimer timeoutTimer;
@@ -2790,8 +2792,9 @@ void MainWindow::rcloneGetVersion() {
 
             // get latest version available
             QString url = "https://api.github.com/repos/totza2010/RcloneBrowser/releases/latest";
-            QNetworkAccessManager manager;
-            QNetworkReply *reply = manager.get(QNetworkRequest(QUrl(url)));
+            auto manager =
+                std::unique_ptr<QNetworkAccessManager>(CreateNetworkAccessManager(this));
+            QNetworkReply *reply = manager->get(QNetworkRequest(QUrl(url)));
             QEventLoop event;
             QTimer timeoutTimer;
             timeoutTimer.setSingleShot(true);

@@ -16,6 +16,10 @@ void SetRcloneConf(const QString &rcloneConf);
 void UseRclonePassword(QProcess *process);
 void SetRclonePassword(const QString &rclonePassword);
 
+QString GetLocalHostsPath();
+void EnsureLocalHostsFile();
+QNetworkAccessManager *CreateNetworkAccessManager(QObject *parent);
+
 QStringList GetDefaultOptionsList(const QString &settingsOptions);
 QStringList GetRemoteModeRcloneOptions();
 QStringList GetShowHidden();

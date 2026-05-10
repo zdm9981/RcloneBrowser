@@ -11,6 +11,228 @@ static QString gRclone;
 static QString gRcloneConf;
 static QString gRclonePassword;
 
+namespace {
+
+constexpr const char *kLocalHostsFileName = "hosts";
+
+QString localHostsHeaderValue(const QUrl &url) {
+  QString host = url.host();
+  if (url.port() != -1) {
+    host += ":" + QString::number(url.port());
+  }
+  return host;
+}
+
+QHash<QString, QString> readLocalHosts() {
+  QHash<QString, QString> hosts;
+  QFile file(GetLocalHostsPath());
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    return hosts;
+  }
+
+  while (!file.atEnd()) {
+    QString line = QString::fromUtf8(file.readLine());
+    const int commentIndex = line.indexOf('#');
+    if (commentIndex >= 0) {
+      line = line.left(commentIndex);
+    }
+    line = line.trimmed();
+    if (line.isEmpty()) {
+      continue;
+    }
+
+    const QStringList parts =
+        line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+    if (parts.size() < 2) {
+      continue;
+    }
+
+    QHostAddress address;
+    if (!address.setAddress(parts.first())) {
+      continue;
+    }
+
+    for (int i = 1; i < parts.size(); ++i) {
+      hosts.insert(parts.at(i).toLower(), parts.first());
+    }
+  }
+
+  return hosts;
+}
+
+class LocalHostsNetworkAccessManager : public QNetworkAccessManager {
+public:
+  explicit LocalHostsNetworkAccessManager(QObject *parent = nullptr)
+      : QNetworkAccessManager(parent) {}
+
+protected:
+  QNetworkReply *createRequest(Operation op, const QNetworkRequest &request,
+                               QIODevice *outgoingData = nullptr) override {
+    QNetworkRequest mappedRequest(request);
+    QUrl url = mappedRequest.url();
+    const QString originalHost = url.host();
+    const QString mappedAddress =
+        readLocalHosts().value(originalHost.toLower());
+
+    if (!mappedAddress.isEmpty()) {
+      mappedRequest.setRawHeader("Host",
+                                 localHostsHeaderValue(url).toUtf8());
+      url.setHost(mappedAddress);
+      mappedRequest.setUrl(url);
+
+      if (url.scheme().compare("https", Qt::CaseInsensitive) == 0) {
+        QSslConfiguration ssl = mappedRequest.sslConfiguration();
+        ssl.setPeerVerifyName(originalHost);
+        mappedRequest.setSslConfiguration(ssl);
+      }
+    }
+
+    return QNetworkAccessManager::createRequest(op, mappedRequest,
+                                                outgoingData);
+  }
+};
+
+class LocalHostsProxyConnection : public QObject {
+public:
+  explicit LocalHostsProxyConnection(qintptr socketDescriptor, QObject *parent)
+      : QObject(parent), mClient(new QTcpSocket(this)) {
+    if (!mClient->setSocketDescriptor(socketDescriptor)) {
+      deleteLater();
+      return;
+    }
+
+    QObject::connect(mClient, &QTcpSocket::readyRead, mClient,
+                     [this]() { readClient(); });
+    QObject::connect(mClient, &QTcpSocket::disconnected, this,
+                     &QObject::deleteLater);
+  }
+
+private:
+  QTcpSocket *mClient = nullptr;
+  QTcpSocket *mUpstream = nullptr;
+  QByteArray mRequestBuffer;
+
+  void readClient() {
+    if (mUpstream) {
+      mUpstream->write(mClient->readAll());
+      return;
+    }
+
+    mRequestBuffer += mClient->readAll();
+    const int headerEnd = mRequestBuffer.indexOf("\r\n\r\n");
+    if (headerEnd < 0) {
+      return;
+    }
+
+    const QByteArray firstLine = mRequestBuffer.left(mRequestBuffer.indexOf("\r\n"));
+    const QList<QByteArray> parts = firstLine.split(' ');
+    if (parts.size() < 3 || parts.at(0).toUpper() != "CONNECT") {
+      mClient->write("HTTP/1.1 501 Not Implemented\r\n\r\n");
+      mClient->disconnectFromHost();
+      return;
+    }
+
+    const QByteArray target = parts.at(1);
+    const int portSeparator = target.lastIndexOf(':');
+    if (portSeparator <= 0) {
+      mClient->write("HTTP/1.1 400 Bad Request\r\n\r\n");
+      mClient->disconnectFromHost();
+      return;
+    }
+
+    const QString host = QString::fromUtf8(target.left(portSeparator));
+    bool ok = false;
+    const quint16 port = target.mid(portSeparator + 1).toUShort(&ok);
+    if (!ok) {
+      mClient->write("HTTP/1.1 400 Bad Request\r\n\r\n");
+      mClient->disconnectFromHost();
+      return;
+    }
+
+    const QString mappedHost = readLocalHosts().value(host.toLower(), host);
+    const QByteArray bodyAfterHeaders = mRequestBuffer.mid(headerEnd + 4);
+
+    mUpstream = new QTcpSocket(this);
+    QObject::connect(mUpstream, &QTcpSocket::connected, mUpstream,
+                     [this, bodyAfterHeaders]() {
+                       mClient->write("HTTP/1.1 200 Connection Established\r\n\r\n");
+                       if (!bodyAfterHeaders.isEmpty()) {
+                         mUpstream->write(bodyAfterHeaders);
+                       }
+                     });
+    QObject::connect(mUpstream, &QTcpSocket::readyRead, mUpstream,
+                     [this]() { mClient->write(mUpstream->readAll()); });
+    QObject::connect(mUpstream, &QTcpSocket::disconnected, mClient,
+                     &QTcpSocket::disconnectFromHost);
+    QObject::connect(mUpstream, &QTcpSocket::errorOccurred, mClient,
+                     [this]() { mClient->disconnectFromHost(); });
+    QObject::connect(mClient, &QTcpSocket::disconnected, mUpstream,
+                     &QTcpSocket::disconnectFromHost);
+
+    mUpstream->connectToHost(mappedHost, port);
+  }
+};
+
+class LocalHostsProxyServer : public QTcpServer {
+public:
+  explicit LocalHostsProxyServer(QObject *parent = nullptr)
+      : QTcpServer(parent) {}
+
+protected:
+  void incomingConnection(qintptr socketDescriptor) override {
+    new LocalHostsProxyConnection(socketDescriptor, this);
+  }
+};
+
+LocalHostsProxyServer *gLocalHostsProxyServer = nullptr;
+
+QString localHostsProxyUrl() {
+  EnsureLocalHostsFile();
+
+  if (readLocalHosts().isEmpty()) {
+    return QString();
+  }
+
+  if (!gLocalHostsProxyServer) {
+    gLocalHostsProxyServer = new LocalHostsProxyServer(qApp);
+  }
+
+  if (!gLocalHostsProxyServer->isListening() &&
+      !gLocalHostsProxyServer->listen(QHostAddress::LocalHost, 0)) {
+    return QString();
+  }
+
+  return QString("http://127.0.0.1:%1")
+      .arg(gLocalHostsProxyServer->serverPort());
+}
+
+} // namespace
+
+QString GetLocalHostsPath() {
+  const QString currentPath = QDir::current().filePath(kLocalHostsFileName);
+  if (QFileInfo::exists(currentPath)) {
+    return currentPath;
+  }
+
+  return QDir(qApp->applicationDirPath()).filePath(kLocalHostsFileName);
+}
+
+void EnsureLocalHostsFile() {
+  QFile file(GetLocalHostsPath());
+  if (file.exists()) {
+    return;
+  }
+
+  if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    file.close();
+  }
+}
+
+QNetworkAccessManager *CreateNetworkAccessManager(QObject *parent) {
+  EnsureLocalHostsFile();
+  return new LocalHostsNetworkAccessManager(parent);
+}
+
 QString GetOpenFileNameNative(QWidget *parent, const QString &caption,
                               const QString &dir, const QString &filter) {
   QFileDialog dialog(parent, caption, dir, filter);
@@ -317,9 +539,23 @@ QString GetRclone() {
 void SetRclone(const QString &rclone) { gRclone = rclone.trimmed(); }
 
 void UseRclonePassword(QProcess *process) {
-  if (!gRclonePassword.isEmpty()) {
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert("RCLONE_CONFIG_PASS", gRclonePassword);
+  const QString proxyUrl = localHostsProxyUrl();
+
+  if (!gRclonePassword.isEmpty() || !proxyUrl.isEmpty()) {
+    QProcessEnvironment env = process->processEnvironment();
+    if (env.isEmpty()) {
+      env = QProcessEnvironment::systemEnvironment();
+    }
+
+    if (!proxyUrl.isEmpty()) {
+      env.insert("HTTPS_PROXY", proxyUrl);
+      env.insert("https_proxy", proxyUrl);
+    }
+
+    if (!gRclonePassword.isEmpty()) {
+      env.insert("RCLONE_CONFIG_PASS", gRclonePassword);
+    }
+
     process->setProcessEnvironment(env);
   }
 }

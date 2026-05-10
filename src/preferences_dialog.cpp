@@ -777,7 +777,7 @@ void PreferencesDialog::onRepoTestClicked(const QString &repo) {
 }
 
 void PreferencesDialog::checkRcloneRepo(const QString &repo) {
-  auto manager = new QNetworkAccessManager(this);
+  auto manager = CreateNetworkAccessManager(this);
   QString repoApi = QString("https://api.github.com/repos/%1").arg(repo);
 
   connect(manager, &QNetworkAccessManager::finished, this, [=](QNetworkReply *reply) {
@@ -804,7 +804,7 @@ void PreferencesDialog::checkRcloneRepo(const QString &repo) {
 }
 
 void PreferencesDialog::checkRcloneCoreFiles(const QString &repo, const QString &branch, const QJsonObject &repoObj) {
-  auto manager = new QNetworkAccessManager(this);
+  auto manager = CreateNetworkAccessManager(this);
   QStringList mustHaveFiles = { "rclone.1", "rclone.go", "librclone/librclone.go" };
   auto haveFiles = std::make_shared<int>(0);
 
@@ -835,7 +835,7 @@ void PreferencesDialog::checkRcloneCoreFiles(const QString &repo, const QString 
 }
 
 void PreferencesDialog::checkRcloneRelease(const QString &repo, const QJsonObject &repoObj) {
-  auto manager = new QNetworkAccessManager(this);
+  auto manager = CreateNetworkAccessManager(this);
   QString releaseApi = QString("https://api.github.com/repos/%1/releases/latest").arg(repo);
   QNetworkReply *reply = manager->get(QNetworkRequest(QUrl(releaseApi)));
 
